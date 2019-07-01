@@ -5,6 +5,9 @@ authors = ["David Roundy <daveroundy@gmail.com>"]
 edition = "2018"
 
 description = "Simple use of letsencrypt.org with warp"
+license = "Apache-2.0/MIT"
+readme = "README.md"
+repository = "https://github.com/droundy/lets-encrypt-warp"
 
 [dependencies]
 
