@@ -4,6 +4,8 @@ version = "0.0.1"
 authors = ["David Roundy <daveroundy@gmail.com>"]
 edition = "2018"
 
+description = "Simple use of letsencrypt.org with warp"
+
 [dependencies]
 
 acme-client = "0.5.3"
