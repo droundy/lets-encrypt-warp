@@ -70,7 +70,7 @@ mod tests {
 /// Run forever on the current thread, serving using TLS to serve on the given domain.
 ///
 /// Errors are reported on stderr.
-pub fn lets_encrypt<F>(service: F, domain: &'static str)
+pub fn lets_encrypt<F>(service: F, domain: &str)
     where F: warp::Filter<Error = warp::Rejection> + Send + Sync + 'static,
           F::Extract: warp::reply::Reply
 {
