@@ -18,31 +18,58 @@ where
     use acme_client::Directory;
 
     let directory = Directory::lets_encrypt().expect("Trouble connecting to let's encrypt");
-    let account = directory
-        .account_registration()
-        .register()
-        .expect("Trouble registring for an account.");
+    if let Ok(account) = directory.account_registration().register() {
+        // Create a identifier authorization for example.com
+        let authorization = account
+            .authorization(domain)
+            .expect("Trouble creating authorization for the account for the domain.");
 
-    // Create a identifier authorization for example.com
-    let authorization = account
-        .authorization(domain)
-        .expect("Trouble creating authorization for the account for the domain.");
-
-    // Validate ownership of example.com with http challenge
-    let http_challenge = authorization
-        .get_http_challenge()
+        // Validate ownership of example.com with http challenge
+        let http_challenge = authorization
+            .get_http_challenge()
         // .ok_or("HTTP challenge not found")
-        .expect("Problem with the challenge");
+            .expect("Problem with the challenge");
 
-    {
-        let authorization = http_challenge.key_authorization().to_string();
-        let token_name = Box::leak(http_challenge.token().to_string().into_boxed_str());
+        {
+            let authorization = http_challenge.key_authorization().to_string();
+            let token_name = Box::leak(http_challenge.token().to_string().into_boxed_str());
+            let domain = domain.to_string();
+            std::thread::spawn(move || {
+                use std::str::FromStr;
+                let token = warp::path!(".well-known" / "acme-challenge")
+                    .and(warp::path(token_name))
+                    .map(move || authorization.clone());
+                let redirect = warp::path::tail()
+                    .map(move |path: warp::path::Tail| {
+                        println!("redirecting to https://{}/{}", domain, path.as_str());
+                        warp::redirect::redirect(warp::http::Uri::from_str(&format!("https://{}/{}",
+                                                                                    &domain,
+                                                                                    path.as_str()))
+                                                 .expect("problem with uri?"))
+                    });
+                warp::serve(token.or(redirect))
+                    .run(([0, 0, 0, 0], 80));
+            });
+        }
+
+        // http_challenge.save_key_authorization("/var/www")?;
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        http_challenge.validate().expect("Trouble validating.");
+
+        let cert = account
+            .certificate_signer(&[&domain])
+            .sign_certificate()
+            .expect("Trouble signing?");
+        cert.save_signed_certificate("certificate.pem")
+            .expect("Touble saving pem");
+        cert.save_private_key("certificate.key")
+            .expect("Trouble saving key");
+    } else {
+        println!("We probably hit our rate limit, so let's hope we've got a valid certificate already.");
+        // We just need to start the redirection portion.
         let domain = domain.to_string();
         std::thread::spawn(move || {
             use std::str::FromStr;
-            let token = warp::path!(".well-known" / "acme-challenge")
-                .and(warp::path(token_name))
-                .map(move || authorization.clone());
             let redirect = warp::path::tail()
                 .map(move |path: warp::path::Tail| {
                     println!("redirecting to https://{}/{}", domain, path.as_str());
@@ -51,23 +78,9 @@ where
                                                                                 path.as_str()))
                                              .expect("problem with uri?"))
                 });
-            warp::serve(token.or(redirect))
-                .run(([0, 0, 0, 0], 80));
+            warp::serve(redirect).run(([0, 0, 0, 0], 80));
         });
     }
-
-    // http_challenge.save_key_authorization("/var/www")?;
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    http_challenge.validate().expect("Trouble validating.");
-
-    let cert = account
-        .certificate_signer(&[domain])
-        .sign_certificate()
-        .expect("Trouble signing?");
-    cert.save_signed_certificate("certificate.pem")
-        .expect("Touble saving pem");
-    cert.save_private_key("certificate.key")
-        .expect("Trouble saving key");
 
     warp::serve(service)
         .tls("certificate.pem", "certificate.key")
