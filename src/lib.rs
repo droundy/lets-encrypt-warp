@@ -34,22 +34,27 @@ where
         // .ok_or("HTTP challenge not found")
         .expect("Problem with the challenge");
 
-    let authorization = http_challenge.key_authorization().to_string();
-    let token_name = Box::leak(http_challenge.token().to_string().into_boxed_str());
-    std::thread::spawn(move || {
-        use std::str::FromStr;
-        let token = warp::path!(".well-known" / "acme-challenge")
-            .and(warp::path(token_name))
-            .map(move || authorization.clone());
-        let redirect = warp::path::tail()
-            .map(|path: warp::path::Tail| {
-                println!("redirecting to https://{}", path.as_str());
-                warp::redirect::redirect(warp::http::Uri::from_str(&format!("https://{}", path.as_str()))
-                                         .expect("problem with uri?"))
-            });
-        warp::serve(token.or(redirect))
-            .run(([0, 0, 0, 0], 80));
-    });
+    {
+        let authorization = http_challenge.key_authorization().to_string();
+        let token_name = Box::leak(http_challenge.token().to_string().into_boxed_str());
+        let domain = domain.to_string();
+        std::thread::spawn(move || {
+            use std::str::FromStr;
+            let token = warp::path!(".well-known" / "acme-challenge")
+                .and(warp::path(token_name))
+                .map(move || authorization.clone());
+            let redirect = warp::path::tail()
+                .map(move |path: warp::path::Tail| {
+                    // println!("redirecting to https://{}/{}", domain, path.as_str());
+                    warp::redirect::redirect(warp::http::Uri::from_str(&format!("https://{}/{}",
+                                                                                &domain,
+                                                                                path.as_str()))
+                                             .expect("problem with uri?"))
+                });
+            warp::serve(token.or(redirect))
+                .run(([0, 0, 0, 0], 80));
+        });
+    }
 
     // http_challenge.save_key_authorization("/var/www")?;
     std::thread::sleep(std::time::Duration::from_millis(500));
