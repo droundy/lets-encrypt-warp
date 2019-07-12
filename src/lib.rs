@@ -45,7 +45,7 @@ where
                 .map(move || authorization.clone());
             let redirect = warp::path::tail()
                 .map(move |path: warp::path::Tail| {
-                    // println!("redirecting to https://{}/{}", domain, path.as_str());
+                    println!("redirecting to https://{}/{}", domain, path.as_str());
                     warp::redirect::redirect(warp::http::Uri::from_str(&format!("https://{}/{}",
                                                                                 &domain,
                                                                                 path.as_str()))
