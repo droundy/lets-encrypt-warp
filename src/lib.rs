@@ -16,6 +16,8 @@ where
     F::Extract: warp::reply::Reply,
 {
     use acme_client::Directory;
+    let pem_name = format!("{}.pem", domain);
+    let key_name = format!("{}.key", domain);
 
     let directory = Directory::lets_encrypt().expect("Trouble connecting to let's encrypt");
     if let Ok(account) = directory.account_registration().register() {
@@ -60,10 +62,8 @@ where
             .certificate_signer(&[&domain])
             .sign_certificate()
             .expect("Trouble signing?");
-        cert.save_signed_certificate("certificate.pem")
-            .expect("Touble saving pem");
-        cert.save_private_key("certificate.key")
-            .expect("Trouble saving key");
+        cert.save_signed_certificate(&pem_name).expect("Touble saving pem");
+        cert.save_private_key(&key_name).expect("Trouble saving key");
     } else {
         println!("We probably hit our rate limit, so let's hope we've got a valid certificate already.");
         // We just need to start the redirection portion.
@@ -83,6 +83,6 @@ where
     }
 
     warp::serve(service)
-        .tls("certificate.pem", "certificate.key")
+        .tls(pem_name, key_name)
         .run(([0, 0, 0, 0], 443));
 }
