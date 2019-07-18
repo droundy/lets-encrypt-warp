@@ -2,6 +2,7 @@
 //! website using warp.
 
 use warp::{path, Filter};
+use futures::sync::oneshot;
 
 /// Run forever on the current thread, serving using TLS to serve on the given domain.
 ///
@@ -14,29 +15,31 @@ pub fn lets_encrypt<F>(service: F, domain: &str)
 where
     F: warp::Filter<Error = warp::Rejection> + Send + Sync + 'static,
     F::Extract: warp::reply::Reply,
+    F: Clone,
 {
     use acme_client::Directory;
     let pem_name = format!("{}.pem", domain);
     let key_name = format!("{}.key", domain);
 
-    const TMIN: std::time::Duration = std::time::Duration::from_secs(60*60*24*30);
-    if time_to_expiration(&pem_name).filter(|&t| t > TMIN).is_none() {
-        let directory = Directory::lets_encrypt().expect("Trouble connecting to let's encrypt");
-        if let Ok(account) = directory.account_registration().register() {
-            // Create a identifier authorization for example.com
-            let authorization = account
-                .authorization(domain)
-                .expect("Trouble creating authorization for the account for the domain.");
-            // Validate ownership of example.com with http challenge
-            let http_challenge = authorization
-                .get_http_challenge()
-            // .ok_or("HTTP challenge not found")
-                .expect("Problem with the challenge");
-            {
-                let authorization = http_challenge.key_authorization().to_string();
-                let token_name = Box::leak(http_challenge.token().to_string().into_boxed_str());
-                let domain = domain.to_string();
-                std::thread::spawn(move || {
+    loop {
+        let (tx80, rx80) = oneshot::channel();
+        const TMIN: std::time::Duration = std::time::Duration::from_secs(60*60*24*30);
+        if time_to_expiration(&pem_name).filter(|&t| t > TMIN).is_none() {
+            let directory = Directory::lets_encrypt().expect("Trouble connecting to let's encrypt");
+            if let Ok(account) = directory.account_registration().register() {
+                // Create a identifier authorization for example.com
+                let authorization = account
+                    .authorization(domain)
+                    .expect("Trouble creating authorization for the account for the domain.");
+                // Validate ownership of example.com with http challenge
+                let http_challenge = authorization
+                    .get_http_challenge()
+                // .ok_or("HTTP challenge not found")
+                    .expect("Problem with the challenge");
+                {
+                    let authorization = http_challenge.key_authorization().to_string();
+                    let token_name = Box::leak(http_challenge.token().to_string().into_boxed_str());
+                    let domain = domain.to_string();
                     use std::str::FromStr;
                     let token = warp::path!(".well-known" / "acme-challenge")
                         .and(warp::path(token_name))
@@ -50,25 +53,23 @@ where
                                                      .expect("problem with uri?"))
                         });
                     warp::serve(token.or(redirect))
-                        .run(([0, 0, 0, 0], 80));
-                });
-            }
+                        .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+                }
 
-            // http_challenge.save_key_authorization("/var/www")?;
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            http_challenge.validate().expect("Trouble validating.");
+                // http_challenge.save_key_authorization("/var/www")?;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                http_challenge.validate().expect("Trouble validating.");
 
-            let cert = account
-                .certificate_signer(&[&domain])
-                .sign_certificate()
-                .expect("Trouble signing?");
-            cert.save_signed_certificate(&pem_name).expect("Touble saving pem");
-            cert.save_private_key(&key_name).expect("Trouble saving key");
-        } else if time_to_expiration(&pem_name).is_some() {
-            println!("We probably hit our rate limit, so let's hope we've got a valid certificate already.");
-            // We just need to start the redirection portion.
-            let domain = domain.to_string();
-            std::thread::spawn(move || {
+                let cert = account
+                    .certificate_signer(&[&domain])
+                    .sign_certificate()
+                    .expect("Trouble signing?");
+                cert.save_signed_certificate(&pem_name).expect("Touble saving pem");
+                cert.save_private_key(&key_name).expect("Trouble saving key");
+            } else if time_to_expiration(&pem_name).is_some() {
+                println!("We probably hit our rate limit, so let's hope we've got a valid certificate already.");
+                // We just need to start the redirection portion.
+                let domain = domain.to_string();
                 use std::str::FromStr;
                 let redirect = warp::path::tail()
                     .map(move |path: warp::path::Tail| {
@@ -78,17 +79,28 @@ where
                                                                                     path.as_str()))
                                                  .expect("problem with uri?"))
                     });
-                warp::serve(redirect).run(([0, 0, 0, 0], 80));
-            });
-        } else {
-            println!("We seem to have failed at every turn to get lets-encrypt working!");
-            std::process::exit(1);
+                warp::serve(redirect)
+                    .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+            } else {
+                println!("We seem to have failed at every turn to get lets-encrypt working!");
+                std::process::exit(1);
+            }
+        }
+
+        let (tx, rx) = oneshot::channel();
+        warp::serve(service.clone())
+            .tls(&pem_name, &key_name)
+            .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx);
+
+        if let Some(time_to_renew) = time_to_expiration(&pem_name)
+            .and_then(|x| x.checked_sub(TMIN))
+        {
+            std::thread::sleep(time_to_renew);
+            tx.send(()).unwrap();
+            tx80.send(()).unwrap();
+            std::thread::sleep(std::time::Duration::from_secs(1)); // FIXME very hokey!
         }
     }
-
-    warp::serve(service)
-        .tls(pem_name, key_name)
-        .run(([0, 0, 0, 0], 443));
 }
 
 fn time_to_expiration<P: AsRef<std::path::Path>>(p: P) -> Option<std::time::Duration> {
