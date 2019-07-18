@@ -54,8 +54,8 @@ where
                                                                                         path.as_str()))
                                                      .expect("problem with uri?"))
                         });
-                    warp::serve(token.or(redirect))
-                        .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+                    warp::spawn(warp::serve(token.or(redirect))
+                                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80).1);
                 }
 
                 // http_challenge.save_key_authorization("/var/www")?;
@@ -81,8 +81,8 @@ where
                                                                                     path.as_str()))
                                                  .expect("problem with uri?"))
                     });
-                warp::serve(redirect)
-                    .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80);
+                warp::spawn(warp::serve(redirect)
+                            .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80).1);
             } else {
                 println!("We seem to have failed at every turn to get lets-encrypt working!");
                 std::process::exit(1);
@@ -90,9 +90,9 @@ where
         }
 
         let (tx, rx) = oneshot::channel();
-        warp::serve(service.clone())
-            .tls(&pem_name, &key_name)
-            .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx);
+        warp::spawn(warp::serve(service.clone())
+                    .tls(&pem_name, &key_name)
+                    .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx).1);
 
         if let Some(time_to_renew) = time_to_expiration(&pem_name)
             .and_then(|x| x.checked_sub(TMIN))
