@@ -13,4 +13,4 @@ repository = "https://github.com/droundy/lets-encrypt-warp"
 
 acme-client = "0.5.3"
 warp = { version = "0.1.16", features = ["tls"] }
-x509-parser = { git = "https://github.com/rusticata/x509-parser" }
+x509-parser = "0.5.1"
