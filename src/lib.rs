@@ -90,9 +90,10 @@ where
         }
 
         let (tx, rx) = oneshot::channel();
-        warp::spawn(warp::serve(service.clone())
-                    .tls(&pem_name, &key_name)
-                    .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx).1);
+        let server = warp::serve(service.clone())
+            .tls(&pem_name, &key_name)
+            .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx).1;
+        warp::spawn(server);
 
         if let Some(time_to_renew) = time_to_expiration(&pem_name)
             .and_then(|x| x.checked_sub(TMIN))
