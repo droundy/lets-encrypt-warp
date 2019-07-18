@@ -24,7 +24,8 @@ where
     loop {
         let (tx80, rx80) = oneshot::channel();
         const TMIN: std::time::Duration = std::time::Duration::from_secs(60*60*24*30);
-        println!("The time to expiration is {:?}", time_to_expiration(&pem_name));
+        println!("The time to expiration of {:?} is {:?}", pem_name,
+                 time_to_expiration(&pem_name));
         if time_to_expiration(&pem_name).filter(|&t| t > TMIN).is_none() {
             let directory = Directory::lets_encrypt().expect("Trouble connecting to let's encrypt");
             if let Ok(account) = directory.account_registration().register() {
