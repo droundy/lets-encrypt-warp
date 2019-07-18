@@ -97,10 +97,14 @@ where
         if let Some(time_to_renew) = time_to_expiration(&pem_name)
             .and_then(|x| x.checked_sub(TMIN))
         {
+            println!("Sleeping for {:?} before renewing", time_to_renew);
             std::thread::sleep(time_to_renew);
+            println!("Now it is time to renew!");
             tx.send(()).unwrap();
             tx80.send(()).unwrap();
             std::thread::sleep(std::time::Duration::from_secs(1)); // FIXME very hokey!
+        } else {
+            println!("Uh oh... looks like we already are at our limit?");
         }
     }
 }
