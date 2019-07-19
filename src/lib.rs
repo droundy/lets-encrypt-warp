@@ -135,8 +135,20 @@ where
                     tx.send(()).unwrap();
                     tx80.send(()).unwrap();
                     std::thread::sleep(std::time::Duration::from_secs(1)); // FIXME very hokey!
+                } else if let Some(time_to_renew) = time_to_expiration(&pem_name) {
+                    // Presumably we already failed to renew, so let's
+                    // just keep using our current certificate as long
+                    // as we can!
+                    println!("Sleeping for {:?} before renewing", time_to_renew);
+                    std::thread::sleep(time_to_renew);
+                    println!("Now it is time to renew!");
+                    tx.send(()).unwrap();
+                    tx80.send(()).unwrap();
+                    std::thread::sleep(std::time::Duration::from_secs(1)); // FIXME very hokey!
                 } else {
                     println!("Uh oh... looks like we already are at our limit?");
+                    println!("Waiting an hour before trying again...");
+                    std::thread::sleep(std::time::Duration::from_secs(60 * 60));
                 }
             }
         },
