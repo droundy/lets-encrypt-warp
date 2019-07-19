@@ -11,13 +11,14 @@ use warp::{path, Filter};
 /// to serve port 80 and port 443.  It obtains TLS credentials from
 /// `letsencrypt.org` and then serves up the site on port 443.  It
 /// also serves redirects on port 80.  Errors are reported on stderr.
-pub fn lets_encrypt<F>(service: F, domain: &'static str)
+pub fn lets_encrypt<F>(service: F, domain: &str)
 where
     F: warp::Filter<Error = warp::Rejection> + Send + Sync + 'static,
     F::Extract: warp::reply::Reply,
     F: Clone,
 {
     use acme_client::Directory;
+    let domain = domain.to_string();
 
     tokio::run(futures::future::lazy(
         move || -> futures::future::Empty<(), ()> {
@@ -39,7 +40,7 @@ where
                         Directory::lets_encrypt().expect("Trouble connecting to let's encrypt");
                     if let Ok(account) = directory.account_registration().register() {
                         // Create a identifier authorization for example.com
-                        let authorization = account.authorization(domain).expect(
+                        let authorization = account.authorization(&domain).expect(
                             "Trouble creating authorization for the account for the domain.",
                         );
                         // Validate ownership of example.com with http challenge
