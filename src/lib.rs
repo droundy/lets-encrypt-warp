@@ -64,14 +64,15 @@ where
                             .expect("problem with uri?"),
                         )
                     });
-                    tokio::run(futures::future::lazy(
-                        move || {
+                    std::thread::spawn(|| {
+                        tokio::run(futures::future::lazy(move || {
                             tokio::spawn(
                                 warp::serve(token.or(redirect))
                                     .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
                                     .1,
                             )
                         }));
+                    });
                 }
 
                 // http_challenge.save_key_authorization("/var/www")?;
@@ -102,14 +103,15 @@ where
                         .expect("problem with uri?"),
                     )
                 });
-                tokio::run(futures::future::lazy(
-                    move || {
+                std::thread::spawn(|| {
+                    tokio::run(futures::future::lazy(move || {
                         tokio::spawn(
                             warp::serve(redirect)
                                 .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
                                 .1,
                         )
                     }));
+                });
             } else {
                 println!("We seem to have failed at every turn to get lets-encrypt working!");
                 std::process::exit(1);
@@ -121,8 +123,8 @@ where
             let service = service.clone();
             let key_name = key_name.clone();
             let pem_name = pem_name.clone();
-            tokio::run(futures::future::lazy(
-                move || {
+            std::thread::spawn(|| {
+                tokio::run(futures::future::lazy(move || {
                     tokio::spawn(
                         warp::serve(service)
                             .tls(&pem_name, &key_name)
@@ -130,6 +132,7 @@ where
                             .1,
                     )
                 }));
+            });
         }
 
         if let Some(time_to_renew) = time_to_expiration(&pem_name).and_then(|x| x.checked_sub(TMIN))
