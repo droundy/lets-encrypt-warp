@@ -65,13 +65,9 @@ where
                         )
                     });
                     std::thread::spawn(|| {
-                        tokio::run(futures::future::lazy(move || {
-                            tokio::spawn(
-                                warp::serve(token.or(redirect))
-                                    .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
-                                    .1,
-                            )
-                        }));
+                        tokio::run(warp::serve(token.or(redirect))
+                                   .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
+                                   .1);
                     });
                 }
 
@@ -104,13 +100,9 @@ where
                     )
                 });
                 std::thread::spawn(|| {
-                    tokio::run(futures::future::lazy(move || {
-                        tokio::spawn(
-                            warp::serve(redirect)
-                                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
-                                .1,
-                        )
-                    }));
+                    tokio::run(warp::serve(redirect)
+                               .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
+                               .1);
                 });
             } else {
                 println!("We seem to have failed at every turn to get lets-encrypt working!");
@@ -123,15 +115,11 @@ where
             let service = service.clone();
             let key_name = key_name.clone();
             let pem_name = pem_name.clone();
-            std::thread::spawn(|| {
-                tokio::run(futures::future::lazy(move || {
-                    tokio::spawn(
-                        warp::serve(service)
-                            .tls(&pem_name, &key_name)
-                            .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx)
-                            .1,
-                    )
-                }));
+            std::thread::spawn(move || {
+                tokio::run(warp::serve(service)
+                           .tls(&pem_name, &key_name)
+                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx)
+                           .1);
             });
         }
 
