@@ -108,6 +108,27 @@ where
                 println!("We seem to have failed at every turn to get lets-encrypt working!");
                 std::process::exit(1);
             }
+        } else {
+            println!("We have a good certificate, just redirect...");
+            // We just need to start the redirection portion.
+            let domain = domain.to_string();
+            use std::str::FromStr;
+            let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
+                println!("redirecting to https://{}/{}", domain, path.as_str());
+                warp::redirect::redirect(
+                    warp::http::Uri::from_str(&format!(
+                        "https://{}/{}",
+                        &domain,
+                        path.as_str()
+                    ))
+                        .expect("problem with uri?"),
+                )
+            });
+            std::thread::spawn(|| {
+                tokio::run(warp::serve(redirect)
+                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
+                           .1);
+            });
         }
 
         let (tx, rx) = oneshot::channel();
