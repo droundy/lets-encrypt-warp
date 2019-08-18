@@ -1,8 +1,6 @@
 # Let's encrypt warp
 
-This rust crate is intended to make TLS encryption with warp very
-easy.
+This rust crate makes TLS encryption with warp very easy.  You just
+specify your domain name, and it works, provided your program has
+permissions to serve on ports 80 and 443.
 
-It is not yet complete, and I have no experience using either TLS or
-lets-encrypt, so we'll see what happens.  When I do figure it out, I
-certainly don't want anyone else to have to do the same.
