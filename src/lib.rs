@@ -11,19 +11,35 @@ use warp::{path, Filter};
 /// to serve port 80 and port 443.  It obtains TLS credentials from
 /// `letsencrypt.org` and then serves up the site on port 443.  It
 /// also serves redirects on port 80.  Errors are reported on stderr.
-pub fn lets_encrypt<F>(service: F, domain: &str)
+pub fn lets_encrypt<F>(service: F, email: &str, domain: &str) -> Result<(), acme_lib::Error>
 where
     F: warp::Filter<Error = warp::Rejection> + Send + Sync + 'static,
     F::Extract: warp::reply::Reply,
     F: Clone,
 {
-    use acme_client::Directory;
     let domain = domain.to_string();
 
     let pem_name = format!("{}.pem", domain);
     let key_name = format!("{}.key", domain);
+
+    // Use DirectoryUrl::LetsEncrypStaging for dev/testing.
+    let url = acme_lib::DirectoryUrl::LetsEncrypt;
+
+    // Save/load keys and certificates to current dir.
+    let persist = acme_lib::persist::FilePersist::new(".");
+
+    // Create a directory entrypoint.
+    let dir = acme_lib::Directory::from_url(persist, url)?;
+
+    // Reads the private account key from persistence, or
+    // creates a new one before accessing the API to establish
+    // that it's there.
+    let acc = dir.account(email)?;
+
+    // Order a new TLS certificate for a domain.
+    let mut ord_new = acc.new_order(&domain, &[])?;
+
     loop {
-        let (tx80, rx80) = oneshot::channel();
         const TMIN: std::time::Duration = std::time::Duration::from_secs(60 * 60 * 24 * 30);
         println!(
             "The time to expiration of {:?} is {:?}",
@@ -34,60 +50,45 @@ where
             .filter(|&t| t > TMIN)
             .is_none()
         {
-            let directory = Directory::lets_encrypt().expect("Trouble connecting to let's encrypt");
-            if let Ok(account) = directory.account_registration().register() {
-                // Create a identifier authorization for example.com
-                let authorization = account
-                    .authorization(&domain)
-                    .expect("Trouble creating authorization for the account for the domain.");
-                // Validate ownership of example.com with http challenge
-                let http_challenge = authorization
-                    .get_http_challenge()
-                    // .ok_or("HTTP challenge not found")
-                    .expect("Problem with the challenge");
-                {
-                    let authorization = http_challenge.key_authorization().to_string();
-                    let token_name = Box::leak(http_challenge.token().to_string().into_boxed_str());
-                    let domain = domain.to_string();
-                    use std::str::FromStr;
-                    let token = warp::path!(".well-known" / "acme-challenge")
-                        .and(warp::path(token_name))
-                        .map(move || authorization.clone());
-                    let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
-                        println!("redirecting to https://{}/{}", domain, path.as_str());
-                        warp::redirect::redirect(
-                            warp::http::Uri::from_str(&format!(
-                                "https://{}/{}",
-                                &domain,
-                                path.as_str()
-                            ))
-                            .expect("problem with uri?"),
-                        )
-                    });
-                    std::thread::spawn(|| {
-                        tokio::run(warp::serve(token.or(redirect))
-                                   .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
-                                   .1);
-                    });
+            // If the ownership of the domain(s) have already been authorized
+            // in a previous order, you might be able to skip validation. The
+            // ACME API provider decides.
+            let ord_csr = loop {
+                // are we done?
+                if let Some(ord_csr) = ord_new.confirm_validations() {
+                    break ord_csr;
                 }
 
-                // http_challenge.save_key_authorization("/var/www")?;
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                http_challenge.validate().expect("Trouble validating.");
+                // Get the possible authorizations (for a single domain
+                // this will only be one element).
+                let auths = ord_new.authorizations()?;
 
-                let cert = account
-                    .certificate_signer(&[&domain])
-                    .sign_certificate()
-                    .expect("Trouble signing?");
-                cert.save_signed_certificate(&pem_name)
-                    .expect("Touble saving pem");
-                cert.save_private_key(&key_name)
-                    .expect("Trouble saving key");
-            } else if time_to_expiration(&pem_name).is_some() {
-                println!("Probably hit our rate limit, so let's hope certificate still valid.");
-                // We just need to start the redirection portion.
+                // For HTTP, the challenge is a text file that needs to
+                // be placed in your web server's root:
+                //
+                // /var/www/.well-known/acme-challenge/<token>
+                //
+                // The important thing is that it's accessible over the
+                // web for the domain(s) you are trying to get a
+                // certificate for:
+                //
+                // http://mydomain.io/.well-known/acme-challenge/<token>
+                let chall = auths[0].http_challenge();
+
+                // The token is the filename.
+                let token = Box::leak(chall.http_token().to_string().into_boxed_str());
+
+                // The proof is the contents of the file
+                let proof = chall.http_proof();
+
+                // Here you must do "something" to place
+                // the file/contents in the correct place.
+                // update_my_web_server(&path, &proof);
                 let domain = domain.to_string();
                 use std::str::FromStr;
+                let token = warp::path!(".well-known" / "acme-challenge")
+                    .and(warp::path(token))
+                    .map(move || proof.clone());
                 let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
                     println!("redirecting to https://{}/{}", domain, path.as_str());
                     warp::redirect::redirect(
@@ -96,21 +97,53 @@ where
                             &domain,
                             path.as_str()
                         ))
-                        .expect("problem with uri?"),
+                            .expect("problem with uri?"),
                     )
                 });
+                let (tx80, rx80) = oneshot::channel();
                 std::thread::spawn(|| {
-                    tokio::run(warp::serve(redirect)
+                    tokio::run(warp::serve(token.or(redirect))
                                .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
                                .1);
                 });
-            } else {
-                println!("We seem to have failed at every turn to get lets-encrypt working!");
-                std::process::exit(1);
-            }
-        } else {
-            println!("We have a good certificate, just redirect...");
-            // We just need to start the redirection portion.
+
+                // After the file is accessible from the web, the calls
+                // this to tell the ACME API to start checking the
+                // existence of the proof.
+                //
+                // The order at ACME will change status to either
+                // confirm ownership of the domain, or fail due to the
+                // not finding the proof. To see the change, we poll
+                // the API with 5000 milliseconds wait between.
+                chall.validate(5000)?;
+                tx80.send(()).unwrap(); // Now stop the server on port 80
+
+                // Update the state against the ACME API.
+                ord_new.refresh()?;
+            };
+
+            // Ownership is proven. Create a private/public key pair for the
+            // certificate. These are provided for convenience, you can
+            // provide your own keypair instead if you want.
+            let (pkey_pri, pkey_pub) = acme_lib::create_p384_key();
+
+            // Submit the CSR. This causes the ACME provider to enter a state
+            // of "processing" that must be polled until the certificate is
+            // either issued or rejected. Again we poll for the status change.
+            let ord_cert =
+                ord_csr.finalize_pkey(pkey_pri, pkey_pub, 5000)?;
+
+            // Now download the certificate. Also stores the cert in the
+            // persistence.
+            let cert = ord_cert.download_and_save_cert()?;
+            std::fs::write(&pem_name, cert.certificate())?;
+            std::fs::write(&key_name, cert.private_key())?;
+        }
+
+        // Now we have working keys, let us use them!
+        let (tx80, rx80) = oneshot::channel();
+        {
+            // First start the redirecting from port 80 to port 443.
             let domain = domain.to_string();
             use std::str::FromStr;
             let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
@@ -130,9 +163,9 @@ where
                            .1);
             });
         }
-
         let (tx, rx) = oneshot::channel();
         {
+            // Now start our actual site.
             let service = service.clone();
             let key_name = key_name.clone();
             let pem_name = pem_name.clone();
@@ -144,6 +177,7 @@ where
             });
         }
 
+        // Now wait until it is time to grab a new certificate.
         if let Some(time_to_renew) = time_to_expiration(&pem_name).and_then(|x| x.checked_sub(TMIN))
         {
             println!("Sleeping for {:?} before renewing", time_to_renew);
