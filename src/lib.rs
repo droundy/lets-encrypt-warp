@@ -1,8 +1,9 @@
 //! A very simple crate to use `letsencrypt.org` to serve an encrypted
 //! website using warp.
 
-use futures::sync::oneshot;
-use warp::{path, Filter};
+use futures::channel::oneshot;
+use futures::executor::block_on;
+use warp::{Filter};
 
 /// Run forever on the current thread, serving using TLS to serve on the given domain.
 ///
@@ -76,7 +77,7 @@ where
                 let chall = auths[0].http_challenge();
 
                 // The token is the filename.
-                let token = Box::leak(chall.http_token().to_string().into_boxed_str());
+                let token: &'static str = Box::leak(chall.http_token().to_string().into_boxed_str());
 
                 // The proof is the contents of the file
                 let proof = chall.http_proof();
@@ -102,8 +103,8 @@ where
                 });
                 let (tx80, rx80) = oneshot::channel();
                 std::thread::spawn(|| {
-                    tokio::run(warp::serve(token.or(redirect))
-                               .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
+                    block_on(warp::serve(token.or(redirect))
+                               .bind_with_graceful_shutdown(([0, 0, 0, 0], 80),  async { rx80.await.ok(); })
                                .1);
                 });
 
@@ -158,9 +159,9 @@ where
                 )
             });
             std::thread::spawn(|| {
-                tokio::run(warp::serve(redirect)
-                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), rx80)
-                           .1);
+                block_on(warp::serve(redirect)
+                         .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async { rx80.await.ok(); })
+                         .1);
             });
         }
         let (tx, rx) = oneshot::channel();
@@ -170,10 +171,12 @@ where
             let key_name = key_name.clone();
             let pem_name = pem_name.clone();
             std::thread::spawn(move || {
-                tokio::run(warp::serve(service)
-                           .tls(&pem_name, &key_name)
-                           .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), rx)
-                           .1);
+                block_on(warp::serve(service)
+                         .tls()
+                         .cert_path(&pem_name)
+                         .key_path(&key_name)
+                         .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), async { rx.await.ok(); })
+                         .1);
             });
         }
 

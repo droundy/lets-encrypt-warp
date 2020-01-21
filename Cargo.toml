@@ -1,6 +1,6 @@
 [package]
 name = "lets-encrypt-warp"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["David Roundy <daveroundy@gmail.com>"]
 edition = "2018"
 
@@ -12,7 +12,7 @@ repository = "https://github.com/droundy/lets-encrypt-warp"
 [dependencies]
 
 acme-lib = "0.5.0"
-warp = { version = "0.1.16", features = ["tls"] }
-futures = "0.1.28"
-tokio = "0.1.22"
-x509-parser = "0.5.1"
+warp = { version = "0.2.0", features = ["tls"] }
+futures = "0.3.1"
+tokio = "0.2.9"
+x509-parser = "0.6.0"
