@@ -60,10 +60,9 @@ where
             // ACME API provider decides.
             let ord_csr = loop {
                 // are we done?
-                match ord_new.clone().read().unwrap().confirm_validations() {
-                    Some(ord_csr) => break ord_csr,
-                    None => {}
-                };
+                if let Some(ord_csr) = ord_new.clone().read().unwrap().confirm_validations() {
+                    break ord_csr;
+                }
 
                 // Get the possible authorizations (for a single domain
                 // this will only be one element).
