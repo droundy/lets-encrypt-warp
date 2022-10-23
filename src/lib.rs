@@ -3,7 +3,7 @@
 
 use futures::channel::oneshot;
 use futures::executor::block_on;
-use warp::{Filter};
+use warp::Filter;
 
 /// Run forever on the current thread, serving using TLS to serve on the given domain.
 ///
@@ -77,7 +77,8 @@ where
                 let chall = auths[0].http_challenge();
 
                 // The token is the filename.
-                let token: &'static str = Box::leak(chall.http_token().to_string().into_boxed_str());
+                let token: &'static str =
+                    Box::leak(chall.http_token().to_string().into_boxed_str());
 
                 // The proof is the contents of the file
                 let proof = chall.http_proof();
@@ -98,14 +99,18 @@ where
                             &domain,
                             path.as_str()
                         ))
-                            .expect("problem with uri?"),
+                        .expect("problem with uri?"),
                     )
                 });
                 let (tx80, rx80) = oneshot::channel();
                 std::thread::spawn(|| {
-                    block_on(warp::serve(token.or(redirect))
-                               .bind_with_graceful_shutdown(([0, 0, 0, 0], 80),  async { rx80.await.ok(); })
-                               .1);
+                    block_on(
+                        warp::serve(token.or(redirect))
+                            .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async {
+                                rx80.await.ok();
+                            })
+                            .1,
+                    );
                 });
 
                 // After the file is accessible from the web, the calls
@@ -126,13 +131,12 @@ where
             // Ownership is proven. Create a private/public key pair for the
             // certificate. These are provided for convenience, you can
             // provide your own keypair instead if you want.
-            let (pkey_pri, pkey_pub) = acme_lib::create_p384_key();
+            let pkey_pri = acme_lib::create_p384_key();
 
             // Submit the CSR. This causes the ACME provider to enter a state
             // of "processing" that must be polled until the certificate is
             // either issued or rejected. Again we poll for the status change.
-            let ord_cert =
-                ord_csr.finalize_pkey(pkey_pri, pkey_pub, 5000)?;
+            let ord_cert = ord_csr.finalize_pkey(pkey_pri, 5000)?;
 
             // Now download the certificate. Also stores the cert in the
             // persistence.
@@ -150,18 +154,18 @@ where
             let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
                 println!("redirecting to https://{}/{}", domain, path.as_str());
                 warp::redirect::redirect(
-                    warp::http::Uri::from_str(&format!(
-                        "https://{}/{}",
-                        &domain,
-                        path.as_str()
-                    ))
+                    warp::http::Uri::from_str(&format!("https://{}/{}", &domain, path.as_str()))
                         .expect("problem with uri?"),
                 )
             });
             std::thread::spawn(|| {
-                block_on(warp::serve(redirect)
-                         .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async { rx80.await.ok(); })
-                         .1);
+                block_on(
+                    warp::serve(redirect)
+                        .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async {
+                            rx80.await.ok();
+                        })
+                        .1,
+                );
             });
         }
         let (tx, rx) = oneshot::channel();
@@ -171,12 +175,16 @@ where
             let key_name = key_name.clone();
             let pem_name = pem_name.clone();
             std::thread::spawn(move || {
-                block_on(warp::serve(service)
-                         .tls()
-                         .cert_path(&pem_name)
-                         .key_path(&key_name)
-                         .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), async { rx.await.ok(); })
-                         .1);
+                block_on(
+                    warp::serve(service)
+                        .tls()
+                        .cert_path(&pem_name)
+                        .key_path(&key_name)
+                        .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), async {
+                            rx.await.ok();
+                        })
+                        .1,
+                );
             });
         }
 
