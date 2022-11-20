@@ -1,8 +1,8 @@
 [package]
 name = "lets-encrypt-warp"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["David Roundy <daveroundy@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 description = "Simple use of letsencrypt.org with warp"
 license = "Apache-2.0/MIT"
@@ -13,7 +13,7 @@ repository = "https://github.com/droundy/lets-encrypt-warp"
 
 acme-lib = "0.8.2"
 openssl-sys = { version = "0.9.77", features = ["vendored"]}
-warp = { version = "0.2.0", features = ["tls"] }
+warp = { version = "0.3.3", features = ["tls"] }
 futures = "0.3.1"
-tokio = "0.2.9"
+tokio = { version = "1.22.0", features = ["time", "rt"] }
 x509-parser = "0.6.0"

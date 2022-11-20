@@ -2,7 +2,6 @@
 //! website using warp.
 
 use futures::channel::oneshot;
-use futures::executor::block_on;
 use warp::Filter;
 
 /// Run forever on the current thread, serving using TLS to serve on the given domain.
@@ -12,7 +11,7 @@ use warp::Filter;
 /// to serve port 80 and port 443.  It obtains TLS credentials from
 /// `letsencrypt.org` and then serves up the site on port 443.  It
 /// also serves redirects on port 80.  Errors are reported on stderr.
-pub fn lets_encrypt<F>(service: F, email: &str, domain: &str) -> Result<(), acme_lib::Error>
+pub async fn lets_encrypt<F>(service: F, email: &str, domain: &str) -> Result<(), acme_lib::Error>
 where
     F: warp::Filter<Error = warp::Rejection> + Send + Sync + 'static,
     F::Extract: warp::reply::Reply,
@@ -77,8 +76,8 @@ where
                 let chall = auths[0].http_challenge();
 
                 // The token is the filename.
-                let token: &'static str =
-                    Box::leak(chall.http_token().to_string().into_boxed_str());
+                // let token: &'static str =
+                //     Box::leak(chall.http_token().to_string().into_boxed_str());
 
                 // The proof is the contents of the file
                 let proof = chall.http_proof();
@@ -88,9 +87,10 @@ where
                 // update_my_web_server(&path, &proof);
                 let domain = domain.to_string();
                 use std::str::FromStr;
-                let token = warp::path!(".well-known" / "acme-challenge")
-                    .and(warp::path(token))
-                    .map(move || proof.clone());
+                let token =
+                    warp::path!(".well-known" / "acme-challenge" / String).map(move |_token| {
+                        proof.clone()
+                    });
                 let redirect = warp::path::tail().map(move |path: warp::path::Tail| {
                     println!("redirecting to https://{}/{}", domain, path.as_str());
                     warp::redirect::redirect(
@@ -103,14 +103,14 @@ where
                     )
                 });
                 let (tx80, rx80) = oneshot::channel();
-                std::thread::spawn(|| {
-                    block_on(
-                        warp::serve(token.or(redirect))
-                            .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async {
-                                rx80.await.ok();
-                            })
-                            .1,
-                    );
+                tokio::task::spawn(async move {
+                    println!("Am serving on port 80!");
+                    warp::serve(token.or(redirect))
+                        .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async {
+                            rx80.await.ok();
+                        })
+                        .1
+                        .await
                 });
 
                 // After the file is accessible from the web, the calls
@@ -158,15 +158,13 @@ where
                         .expect("problem with uri?"),
                 )
             });
-            std::thread::spawn(|| {
-                block_on(
-                    warp::serve(redirect)
-                        .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async {
-                            rx80.await.ok();
-                        })
-                        .1,
-                );
-            });
+            tokio::task::spawn(
+                warp::serve(redirect)
+                    .bind_with_graceful_shutdown(([0, 0, 0, 0], 80), async {
+                        rx80.await.ok();
+                    })
+                    .1,
+            );
         }
         let (tx, rx) = oneshot::channel();
         {
@@ -174,29 +172,27 @@ where
             let service = service.clone();
             let key_name = key_name.clone();
             let pem_name = pem_name.clone();
-            std::thread::spawn(move || {
-                block_on(
-                    warp::serve(service)
-                        .tls()
-                        .cert_path(&pem_name)
-                        .key_path(&key_name)
-                        .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), async {
-                            rx.await.ok();
-                        })
-                        .1,
-                );
-            });
+            tokio::spawn(
+                warp::serve(service)
+                    .tls()
+                    .cert_path(&pem_name)
+                    .key_path(&key_name)
+                    .bind_with_graceful_shutdown(([0, 0, 0, 0], 443), async {
+                        rx.await.ok();
+                    })
+                    .1,
+            );
         }
 
         // Now wait until it is time to grab a new certificate.
         if let Some(time_to_renew) = time_to_expiration(&pem_name).and_then(|x| x.checked_sub(TMIN))
         {
             println!("Sleeping for {:?} before renewing", time_to_renew);
-            std::thread::sleep(time_to_renew);
+            tokio::time::sleep(time_to_renew).await;
             println!("Now it is time to renew!");
             tx.send(()).unwrap();
             tx80.send(()).unwrap();
-            std::thread::sleep(std::time::Duration::from_secs(1)); // FIXME very hokey!
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await; // FIXME very hokey!
         } else if let Some(time_to_renew) = time_to_expiration(&pem_name) {
             // Presumably we already failed to renew, so let's
             // just keep using our current certificate as long
